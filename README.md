@@ -52,6 +52,82 @@ The built-in `memory-lancedb` plugin in OpenClaw provides basic vector search. *
 
 ---
 
+## 🧪 Beta: Smart Memory v1.1.0
+
+> **Status**: Beta — available on npm under the `beta` dist-tag. Stable users on `latest` are not affected.
+
+The `dev/smart-memory-v1.1.0` branch introduces three major enhancements to the memory write & retrieval pipeline:
+
+### What's New
+
+| Feature | Description |
+|---------|-------------|
+| **Smart Extraction** | LLM-powered 6-category extraction (profile, preferences, entities, events, cases, patterns) with L0/L1/L2 layered metadata. Falls back to regex capture when disabled or LLM init fails. |
+| **Lifecycle Scoring** | Weibull decay model integrated into retrieval — scores are adjusted by `max(tierFloor, decayComposite)` so frequently-accessed and high-importance memories rank higher. |
+| **Tier Management** | Three-tier system (Core → Working → Peripheral) with automatic promotion/demotion based on access frequency, composite score, and importance. |
+
+### Install the Beta
+
+```bash
+npm i memory-lancedb-pro@beta
+```
+
+Or pin the exact version:
+
+```bash
+npm i memory-lancedb-pro@1.1.0-beta.1
+```
+
+### Configuration
+
+Smart extraction is **enabled by default**. It reuses your existing embedding API key for LLM calls (or you can configure a separate LLM endpoint):
+
+```json
+{
+  "plugins.entries.memory-lancedb-pro": {
+    "config": {
+      "smartExtraction": true,
+      "llm": {
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "gpt-4o-mini",
+        "baseURL": "https://api.openai.com/v1"
+      },
+      "extractMinMessages": 4,
+      "extractMaxChars": 8000
+    }
+  }
+}
+```
+
+| Config Key | Default | Description |
+|------------|---------|-------------|
+| `smartExtraction` | `true` | Enable/disable LLM-powered extraction |
+| `llm.apiKey` | *(embedding apiKey)* | API key for extraction LLM |
+| `llm.model` | `gpt-4o-mini` | LLM model for extraction & dedup |
+| `llm.baseURL` | *(embedding baseURL)* | Base URL for LLM API |
+| `extractMinMessages` | `4` | Min conversation messages before extraction triggers |
+| `extractMaxChars` | `8000` | Max conversation chars to process |
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `src/smart-extractor.ts` | LLM extraction pipeline: conversation → extract → dedup → persist |
+| `src/extraction-prompts.ts` | Prompt templates for extraction, dedup, and merge |
+| `src/llm-client.ts` | OpenAI-compatible LLM client with JSON parsing |
+| `src/memory-categories.ts` | 6-category classification system + merge strategies |
+| `src/decay-engine.ts` | Weibull stretched-exponential decay with tier-specific beta |
+| `src/tier-manager.ts` | Three-tier promotion/demotion lifecycle manager |
+
+### Feedback
+
+This is a beta release — please report issues or share feedback at:
+- [GitHub Issues](https://github.com/win4r/memory-lancedb-pro/issues)
+
+To revert to stable: `npm i memory-lancedb-pro@latest`
+
+---
+
 ## Architecture
 
 ```
@@ -92,6 +168,12 @@ The built-in `memory-lancedb` plugin in OpenClaw provides basic vector search. *
 | `src/noise-filter.ts` | Noise filter. Filters out agent refusals, meta-questions, greetings, and low-quality content |
 | `src/adaptive-retrieval.ts` | Adaptive retrieval. Determines whether a query needs memory retrieval (skips greetings, slash commands, simple confirmations, emoji) |
 | `src/migrate.ts` | Migration tool. Migrates data from the built-in `memory-lancedb` plugin to Pro |
+| `src/smart-extractor.ts` | *(Beta)* LLM-powered 6-category extraction pipeline with L0/L1/L2 layered storage |
+| `src/extraction-prompts.ts` | *(Beta)* Prompt templates for memory extraction, dedup decisions, and merge |
+| `src/llm-client.ts` | *(Beta)* OpenAI-compatible LLM client wrapper with JSON fence parsing |
+| `src/memory-categories.ts` | *(Beta)* 6-category classification (profile, preferences, entities, events, cases, patterns) |
+| `src/decay-engine.ts` | *(Beta)* Weibull decay model with importance-modulated half-life and tier-specific beta |
+| `src/tier-manager.ts` | *(Beta)* Three-tier (Core/Working/Peripheral) promotion/demotion lifecycle manager |
 
 ---
 

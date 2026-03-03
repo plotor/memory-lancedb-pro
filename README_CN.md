@@ -52,6 +52,82 @@ OpenClaw 内置的 `memory-lancedb` 插件仅提供基本的向量搜索。**mem
 
 ---
 
+## 🧪 Beta：智能记忆 v1.1.0
+
+> **状态**：Beta 版 — 通过 npm `beta` dist-tag 发布，不影响 `latest` 稳定通道。
+
+`dev/smart-memory-v1.1.0` 分支为记忆写入和检索管线引入了三大增强：
+
+### 新功能
+
+| 功能 | 说明 |
+|------|------|
+| **智能提取** | LLM 驱动的 6 类别提取（profile、preferences、entities、events、cases、patterns），支持 L0/L1/L2 分层元数据。禁用或 LLM 初始化失败时回退到正则捕获。 |
+| **生命周期评分** | Weibull 衰减模型集成到检索中 — 分数通过 `max(tierFloor, decayComposite)` 调整，高频访问和高重要性的记忆排名更靠前。 |
+| **分层管理** | 三层系统（Core → Working → Peripheral），根据访问频率、复合得分和重要性自动晋升/降级。 |
+
+### 安装 Beta 版
+
+```bash
+npm i memory-lancedb-pro@beta
+```
+
+或指定精确版本：
+
+```bash
+npm i memory-lancedb-pro@1.1.0-beta.1
+```
+
+### 配置
+
+智能提取**默认开启**。它复用你现有的 embedding API key 进行 LLM 调用（也可以单独配置 LLM 端点）：
+
+```json
+{
+  "plugins.entries.memory-lancedb-pro": {
+    "config": {
+      "smartExtraction": true,
+      "llm": {
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "gpt-4o-mini",
+        "baseURL": "https://api.openai.com/v1"
+      },
+      "extractMinMessages": 4,
+      "extractMaxChars": 8000
+    }
+  }
+}
+```
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `smartExtraction` | `true` | 启用/禁用 LLM 驱动提取 |
+| `llm.apiKey` | *(embedding apiKey)* | 提取 LLM 的 API key |
+| `llm.model` | `gpt-4o-mini` | 提取和去重使用的 LLM 模型 |
+| `llm.baseURL` | *(embedding baseURL)* | LLM API 的 Base URL |
+| `extractMinMessages` | `4` | 触发提取的最少对话消息数 |
+| `extractMaxChars` | `8000` | 处理提取的最大对话字符数 |
+
+### 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `src/smart-extractor.ts` | LLM 提取管线：对话 → 提取 → 去重 → 持久化 |
+| `src/extraction-prompts.ts` | 提取、去重和合并的提示词模板 |
+| `src/llm-client.ts` | OpenAI 兼容 LLM 客户端，含 JSON 解析 |
+| `src/memory-categories.ts` | 6 类别分类系统 + 合并策略 |
+| `src/decay-engine.ts` | Weibull 拉伸指数衰减模型 |
+| `src/tier-manager.ts` | 三层晋升/降级生命周期管理器 |
+
+### 反馈
+
+这是 beta 版本 — 欢迎在以下地方报告问题或分享反馈：
+- [GitHub Issues](https://github.com/win4r/memory-lancedb-pro/issues)
+
+回退到稳定版：`npm i memory-lancedb-pro@latest`
+
+---
+
 ## 架构概览
 
 ```
@@ -92,6 +168,12 @@ OpenClaw 内置的 `memory-lancedb` 插件仅提供基本的向量搜索。**mem
 | `src/noise-filter.ts` | 噪声过滤器。过滤 Agent 拒绝回复、Meta 问题、寒暄等低质量记忆 |
 | `src/adaptive-retrieval.ts` | 自适应检索。判断 query 是否需要触发记忆检索（跳过问候、命令、简单确认等） |
 | `src/migrate.ts` | 迁移工具。从旧版 `memory-lancedb` 插件迁移数据到 Pro 版 |
+| `src/smart-extractor.ts` | *(Beta)* LLM 驱动的 6 类别提取管线，L0/L1/L2 分层存储 |
+| `src/extraction-prompts.ts` | *(Beta)* 记忆提取、去重决策和合并的提示词模板 |
+| `src/llm-client.ts` | *(Beta)* OpenAI 兼容 LLM 客户端封装，含 JSON 围栏解析 |
+| `src/memory-categories.ts` | *(Beta)* 6 类别分类（profile、preferences、entities、events、cases、patterns） |
+| `src/decay-engine.ts` | *(Beta)* Weibull 衰减模型，重要性调制半衰期 + 分层 beta |
+| `src/tier-manager.ts` | *(Beta)* 三层（Core/Working/Peripheral）晋升/降级生命周期管理器 |
 
 ---
 
