@@ -197,6 +197,7 @@ export class SmartExtractor {
       try {
         await this.processCandidate(
           candidate,
+          conversationText,
           sessionKey,
           stats,
           targetScope,
@@ -373,6 +374,7 @@ export class SmartExtractor {
    */
   private async processCandidate(
     candidate: CandidateMemory,
+    conversationText: string,
     sessionKey: string,
     stats: ExtractionStats,
     targetScope: string,
@@ -382,10 +384,10 @@ export class SmartExtractor {
     if (ALWAYS_MERGE_CATEGORIES.has(candidate.category)) {
       await this.handleProfileMerge(
         candidate,
+        conversationText,
         sessionKey,
         targetScope,
         scopeFilter,
-        admission?.audit,
       );
       stats.merged++;
       return;
@@ -406,7 +408,7 @@ export class SmartExtractor {
       ? await this.admissionController.evaluate({
           candidate,
           candidateVector: vector,
-          conversationText: "",
+          conversationText,
           scopeFilter: scopeFilter ?? [targetScope],
         })
       : undefined;
@@ -418,7 +420,7 @@ export class SmartExtractor {
       );
       await this.recordRejectedAdmission(
         candidate,
-        "",
+        conversationText,
         sessionKey,
         targetScope,
         scopeFilter ?? [targetScope],
@@ -657,6 +659,7 @@ export class SmartExtractor {
    */
   private async handleProfileMerge(
     candidate: CandidateMemory,
+    conversationText: string,
     sessionKey: string,
     targetScope: string,
     scopeFilter?: string[],
@@ -671,14 +674,14 @@ export class SmartExtractor {
       const profileAdmission = await this.admissionController.evaluate({
         candidate,
         candidateVector: vector,
-        conversationText: "",
+        conversationText,
         scopeFilter: scopeFilter ?? [targetScope],
       });
       if (profileAdmission.decision === "reject") {
         this.log(
           `memory-pro: smart-extractor: admission rejected profile [${candidate.abstract.slice(0, 60)}] — ${profileAdmission.audit.reason}`,
         );
-        await this.recordRejectedAdmission(candidate, "", sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
+        await this.recordRejectedAdmission(candidate, conversationText, sessionKey, targetScope, scopeFilter ?? [targetScope], profileAdmission.audit as AdmissionAuditRecord & { decision: "reject" });
         return;
       }
       admissionAudit = profileAdmission.audit;
