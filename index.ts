@@ -1640,6 +1640,45 @@ const pluginVersion = getPluginVersion();
 // hook/tool registration for the new API instance" regression that rwmjhb identified.
 const _registeredApis = new WeakSet<OpenClawPluginApi>();
 
+// ============================================================================
+// Hook Event Deduplication (Phase 1)
+// ============================================================================
+//
+// OpenClaw calls register() once per scope init (5× at startup, 4× per inbound
+// message that triggers a scope cache-miss). Each call pushes handlers into the
+// global registerInternalHook Map. Without guarding, handlers accumulate
+// unboundedly — observed: 200+ duplicate handlers after hours of uptime.
+//
+// We cannot guard at registration time because clearInternalHooks() is called
+// between the first and subsequent register() calls. Guard at handler invocation
+// instead, keyed on (handlerName, sessionKey, timestamp).
+//
+
+/** Dedup guard: Set of already-processed hook event keys. */
+const _hookEventDedup = new Set<string>();
+
+/**
+ * Returns true if this event was already processed (skip), false if first
+ * occurrence (proceed). Automatically prunes Set when size > 200.
+ */
+function _dedupHookEvent(handlerName: string, event: any): boolean {
+  const sk = typeof event?.sessionKey === "string" ? event.sessionKey : "?";
+  const ts = event?.timestamp instanceof Date
+    ? event.timestamp.getTime()
+    : (typeof event?.timestamp === "number" ? event.timestamp : Date.now());
+  const key = `${handlerName}:${sk}:${ts}`;
+  if (_hookEventDedup.has(key)) return true; // duplicate — skip
+  _hookEventDedup.add(key);
+  if (_hookEventDedup.size > 200) {
+    // Keep newest 100: convert to array (preserves insertion order), slice last 100, clear, re-add
+    const arr = Array.from(_hookEventDedup);
+    const newest100 = arr.slice(-100);
+    _hookEventDedup.clear();
+    for (const k of newest100) _hookEventDedup.add(k);
+  }
+  return false; // first occurrence — proceed
+}
+
 const memoryLanceDBProPlugin = {
   id: "memory-lancedb-pro",
   name: "Memory (LanceDB Pro)",
@@ -2950,18 +2989,16 @@ const memoryLanceDBProPlugin = {
 
     if (config.selfImprovement?.enabled !== false) {
       api.registerHook("agent:bootstrap", async (event) => {
+        const context = (event.context || {}) as Record<string, unknown>;
+        const sessionKey = typeof event.sessionKey === "string" ? event.sessionKey : "";
+
+        // Validation BEFORE dedup — invalid sessions must NOT pollute the dedup set
+        if (isInternalReflectionSessionKey(sessionKey)) { return; }
+        if (config.selfImprovement?.skipSubagentBootstrap !== false && sessionKey.includes(":subagent:")) { return; }
+
+        if (_dedupHookEvent("bootstrap", event)) return;
         try {
-          const context = (event.context || {}) as Record<string, unknown>;
-          const sessionKey = typeof event.sessionKey === "string" ? event.sessionKey : "";
           const workspaceDir = resolveWorkspaceDirFromContext(context);
-
-          if (isInternalReflectionSessionKey(sessionKey)) {
-            return;
-          }
-
-          if (config.selfImprovement?.skipSubagentBootstrap !== false && sessionKey.includes(":subagent:")) {
-            return;
-          }
 
           if (config.selfImprovement?.ensureLearningFiles !== false) {
             await ensureSelfImprovementLearningFiles(workspaceDir);
@@ -2993,6 +3030,14 @@ const memoryLanceDBProPlugin = {
 
       if (config.selfImprovement?.beforeResetNote !== false) {
         const appendSelfImprovementNote = async (event: any) => {
+          // Basic validation BEFORE dedup — skip events that will legitimately return anyway
+          if (!Array.isArray(event.messages)) {
+            api.logger.warn(`self-improvement: command:${String(event?.action || "unknown")} missing event.messages array; skip note inject`);
+            return;
+          }
+
+          if (_dedupHookEvent("selfImprovement", event)) return;
+
           try {
             const action = String(event?.action || "unknown");
             const sessionKeyForLog = typeof event?.sessionKey === "string" ? event.sessionKey : "";
@@ -3004,11 +3049,6 @@ const memoryLanceDBProPlugin = {
             api.logger.info(
               `self-improvement: command:${action} hook start; sessionKey=${sessionKeyForLog || "(none)"}; source=${commandSource || "(unknown)"}; hasMessages=${Array.isArray(event?.messages)}; contextKeys=${contextKeys || "(none)"}`
             );
-
-            if (!Array.isArray(event.messages)) {
-              api.logger.warn(`self-improvement: command:${action} missing event.messages array; skip note inject`);
-              return;
-            }
 
             // Skip self-improvement note on Discord channel (non-thread) resets
             // to avoid contributing to the post-reset startup race on Discord channels.
@@ -3247,6 +3287,14 @@ const memoryLanceDBProPlugin = {
 
       const runMemoryReflection = async (event: any) => {
         const sessionKey = typeof event.sessionKey === "string" ? event.sessionKey : "";
+
+        // Validate sessionKey BEFORE dedup — invalid/empty keys must NOT pollute the dedup set
+        if (!sessionKey) {
+          // skip events without a valid sessionKey — they are not meaningful for reflection
+          return;
+        }
+
+        if (_dedupHookEvent("reflection", event)) return;
         // Guard against re-entrant calls for the same session (e.g. file-write triggering another command:new)
         // Uses global lock shared across all plugin instances to prevent loop amplification.
         const globalLock = getGlobalReflectionLock();
